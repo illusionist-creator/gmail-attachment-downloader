@@ -28,63 +28,48 @@ def gmail_authenticate():
         except Exception as e:
             log_message(f"⚠️ Failed to use cached token: {str(e)}")
     
-    # Load token locally (for local development only)
-    is_cloud = st.secrets.get("IS_CLOUD_DEPLOYMENT", False)
-    if not is_cloud and os.path.exists("token.json"):
-        try:
-            creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-            log_message("✅ Loaded local token.json")
-            return build("gmail", "v1", credentials=creds)
-        except Exception as e:
-            log_message(f"⚠️ Failed to load token.json: {str(e)}")
-    
     # Use Streamlit's interface for OAuth
     if "google" in st.secrets and "credentials_json" in st.secrets["google"]:
         creds_data = json.loads(st.secrets["google"]["credentials_json"])
         
-        # Get OAuth URL
-        flow = InstalledAppFlow.from_client_config(creds_data, SCOPES,
-                redirect_uri="urn:ietf:wg:oauth:2.0:oob")
+        # ======== CHANGED SECTION START ========
+        # Configure for web application
+        flow = Flow.from_client_config(
+            client_config=creds_data,
+            scopes=SCOPES,
+            redirect_uri="http://localhost:8501"  # For local development
+        )
+        
+        # Generate authorization URL
         auth_url, _ = flow.authorization_url(prompt='consent')
         
-        # Show OAuth URL to user
-        st.markdown("### Google Authentication Required")
-        st.markdown("""
-        1. Click the link below to authorize this app
-        2. Sign in with your Google account
-        3. Grant the requested permissions
-        4. Copy the authorization code
-        5. Paste the code in the box below
-        """)
-        st.markdown(f"[Click here to authorize with Google]({auth_url})", unsafe_allow_html=True)
-        
-        # Get the authorization code from the user
-        code = st.text_input("Enter the authorization code:", type="password")
-        
-        if code:
+        # Check for callback code
+        query_params = st.experimental_get_query_params()
+        if "code" in query_params:
             try:
-                # Exchange auth code for credentials
+                code = query_params["code"][0]
                 flow.fetch_token(code=code)
                 creds = flow.credentials
                 
-                # Save token to session state
+                # Save credentials
                 st.session_state.token_info = json.loads(creds.to_json())
-                
-                # Save token.json locally (for dev only)
-                if not is_cloud:
-                    with open("token.json", "w") as token_file:
-                        token_file.write(creds.to_json())
-                    log_message("✅ Saved token.json locally")
-                
-                # Build and return service
-                service = build("gmail", "v1", credentials=creds)
-                service.users().getProfile(userId='me').execute()
                 log_message("✅ Successfully connected to Gmail API")
-                return service
+                
+                # Clear the code from URL
+                st.experimental_set_query_params()
+                return build("gmail", "v1", credentials=creds)
             except Exception as e:
                 st.error(f"Authentication failed: {str(e)}")
                 log_message(f"❌ Authentication error: {str(e)}")
-                return None
+        else:
+            st.markdown("### Google Authentication Required")
+            st.markdown(f"""
+            1. [Authorize with Google]({auth_url})
+            2. You'll be redirected back automatically
+            """)
+            st.stop()
+        # ======== CHANGED SECTION END ========
+    
     else:
         st.error("Google credentials missing in Streamlit secrets")
         log_message("❌ Google credentials missing in Streamlit secrets")
