@@ -3,6 +3,8 @@ import os
 import base64
 import re
 import uuid
+import zipfile
+import io
 from datetime import datetime
 from logs import log_message
 
@@ -67,7 +69,7 @@ def classify_extension(filename):
     
     return type_map.get(ext, "Other")
 
-def save_attachment(service, msg_id, part, sender_email, search_term, base_folder="downloads"):
+def save_attachment(service, msg_id, part, sender_email, search_term, base_folder="downloads", in_memory=False, memory_files=None):
     """Save an email attachment to disk with better organization and error handling"""
     try:
         # Clean up the filename
@@ -92,17 +94,13 @@ def save_attachment(service, msg_id, part, sender_email, search_term, base_folde
         else:
             clean_sender = sender_email.strip()
             
-        # Create the folder structure
-        save_path = os.path.join(
-            base_folder,
+        # Create the folder structure path (used for both disk and in-memory)
+        relative_path = os.path.join(
             sanitize_filename(clean_sender),
             sanitize_filename(search_folder),
             file_type,
             filename
         )
-        
-        # Make sure the directory exists
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         
         # Get the attachment ID
         attachment_id = part["body"].get("attachmentId")
@@ -118,36 +116,46 @@ def save_attachment(service, msg_id, part, sender_email, search_term, base_folde
             log_message(f"⚠️ No data in attachment: {original_name}")
             return False
             
-        # Decode and save the file
+        # Decode the file data
         file_data = base64.urlsafe_b64decode(att["data"].encode("UTF-8"))
         
-        with open(save_path, "wb") as f:
-            f.write(file_data)
-        
-        log_message(f"✅ Saved: {save_path}")
+        if in_memory and memory_files is not None:
+            # Store in memory for later zipping and downloading
+            memory_files[relative_path] = file_data
+            log_message(f"✅ Added to zip: {relative_path}")
+        else:
+            # Save to disk on server (original behavior)
+            save_path = os.path.join(base_folder, relative_path)
+            # Make sure the directory exists
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            with open(save_path, "wb") as f:
+                f.write(file_data)
+            log_message(f"✅ Saved to server: {save_path}")
+            
         return True
         
     except Exception as e:
         log_message(f"❌ Failed to save {part.get('filename', 'unknown file')}: {str(e)}")
         return False
         
-def extract_attachments(service, msg_id, payload, sender_email, search_term, base_folder):
+def extract_attachments(service, msg_id, payload, sender_email, search_term, base_folder, in_memory=False, memory_files=None):
     """Recursively extract all attachments from an email"""
     saved_files = 0
     
     # If we have parts, process each part
     if "parts" in payload:
         for part in payload["parts"]:
-            saved_files += extract_attachments(service, msg_id, part, sender_email, search_term, base_folder)
+            saved_files += extract_attachments(service, msg_id, part, sender_email, search_term, base_folder, in_memory, memory_files)
     
     # Process this part if it's an attachment
     elif payload.get("filename") and "attachmentId" in payload.get("body", {}):
-        if save_attachment(service, msg_id, payload, sender_email, search_term, base_folder):
+        if save_attachment(service, msg_id, payload, sender_email, search_term, base_folder, in_memory, memory_files):
             saved_files += 1
             
     return saved_files
 
-def download_attachments(service, msg_id, sender_email, search_term="", base_folder="downloads"):
+def download_attachments(service, msg_id, sender_email, search_term="", base_folder="downloads", in_memory=False, memory_files=None):
     """Download all attachments from an email and return count of files saved"""
     try:
         # Get the full message
@@ -160,8 +168,24 @@ def download_attachments(service, msg_id, sender_email, search_term="", base_fol
         payload = msg['payload']
         
         # Extract and return number of saved files
-        return extract_attachments(service, msg_id, payload, sender_email, search_term, base_folder)
+        return extract_attachments(service, msg_id, payload, sender_email, search_term, base_folder, in_memory, memory_files)
         
     except Exception as e:
         log_message(f"❌ Error downloading attachments for message {msg_id}: {str(e)}")
+        raise
+
+def create_zip_from_attachments(memory_files):
+    """Create a zip file from in-memory attachments"""
+    try:
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for file_path, file_data in memory_files.items():
+                zip_file.writestr(file_path, file_data)
+                
+        zip_buffer.seek(0)
+        log_message(f"✅ Created zip archive with {len(memory_files)} files")
+        return zip_buffer
+    except Exception as e:
+        log_message(f"❌ Failed to create zip file: {str(e)}")
         raise
