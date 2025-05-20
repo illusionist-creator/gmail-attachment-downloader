@@ -37,7 +37,7 @@ def gmail_authenticate():
         flow = Flow.from_client_config(
             client_config=creds_data,
             scopes=SCOPES,
-            redirect_uri="http://localhost:8501"  # For local development
+            redirect_uri="https://gmail-attachment-downloader.streamlit.app/"
         )
         
         # Generate authorization URL
