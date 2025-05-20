@@ -88,18 +88,19 @@ with auth_col2:
         st.markdown('<div class="auth-btn">', unsafe_allow_html=True)
         if st.button("🔐 Connect Gmail"):
             try:
-                with st.spinner("Connecting to Gmail..."):
+                with st.spinner("Preparing Gmail connection..."):
                     st.session_state.service = gmail_authenticate()
+                if st.session_state.service:
                     st.session_state.sender_list = get_unique_senders(st.session_state.service)
-                st.success("Authentication successful!")
-                st.rerun()
+                    st.success("Authentication successful!")
+                    st.rerun()
             except Exception as e:
                 st.error(f"Authentication failed: {str(e)}")
                 log_message(f"Authentication error: {str(e)}")
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         if st.button("🔒 Logout"):
-            for key in ["service", "df", "sender_list", "sender_select", "download_status"]:
+            for key in ["service", "df", "sender_list", "sender_select", "download_status", "token_info"]:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()

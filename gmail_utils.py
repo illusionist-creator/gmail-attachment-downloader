@@ -15,53 +15,81 @@ BATCH_SIZE = 25
 RETRY_DELAY = 2
 
 def gmail_authenticate():
-    """Authenticate with Gmail API and return service object."""
+    """Authenticate with Gmail API using Streamlit interface."""
     creds = None
-
+    
+    # Check for existing token in session state
+    if "token_info" in st.session_state:
+        try:
+            creds = Credentials.from_authorized_user_info(
+                st.session_state.token_info, SCOPES)
+            if creds and creds.valid:
+                return build("gmail", "v1", credentials=creds)
+        except Exception as e:
+            log_message(f"⚠️ Failed to use cached token: {str(e)}")
+    
     # Load token locally (for local development only)
     is_cloud = st.secrets.get("IS_CLOUD_DEPLOYMENT", False)
     if not is_cloud and os.path.exists("token.json"):
         try:
             creds = Credentials.from_authorized_user_file("token.json", SCOPES)
             log_message("✅ Loaded local token.json")
+            return build("gmail", "v1", credentials=creds)
         except Exception as e:
             log_message(f"⚠️ Failed to load token.json: {str(e)}")
-
-    # Use OAuth flow if no valid credentials
-    if not creds or not creds.valid:
-        try:
-            if "google" in st.secrets and "credentials_json" in st.secrets["google"]:
-                creds_data = json.loads(st.secrets["google"]["credentials_json"])
-                flow = InstalledAppFlow.from_client_config(creds_data, SCOPES)
-
-                if is_cloud:
-                    log_message("🌐 Running on Streamlit Cloud – using run_console()")
-                    creds = flow.run_console()
-                else:
-                    log_message("🖥️ Running locally – using run_local_server()")
-                    creds = flow.run_local_server(port=0)
-
+    
+    # Use Streamlit's interface for OAuth
+    if "google" in st.secrets and "credentials_json" in st.secrets["google"]:
+        creds_data = json.loads(st.secrets["google"]["credentials_json"])
+        
+        # Get OAuth URL
+        flow = InstalledAppFlow.from_client_config(creds_data, SCOPES,
+                redirect_uri="urn:ietf:wg:oauth:2.0:oob")
+        auth_url, _ = flow.authorization_url(prompt='consent')
+        
+        # Show OAuth URL to user
+        st.markdown("### Google Authentication Required")
+        st.markdown("""
+        1. Click the link below to authorize this app
+        2. Sign in with your Google account
+        3. Grant the requested permissions
+        4. Copy the authorization code
+        5. Paste the code in the box below
+        """)
+        st.markdown(f"[Click here to authorize with Google]({auth_url})", unsafe_allow_html=True)
+        
+        # Get the authorization code from the user
+        code = st.text_input("Enter the authorization code:", type="password")
+        
+        if code:
+            try:
+                # Exchange auth code for credentials
+                flow.fetch_token(code=code)
+                creds = flow.credentials
+                
+                # Save token to session state
+                st.session_state.token_info = json.loads(creds.to_json())
+                
                 # Save token.json locally (for dev only)
                 if not is_cloud:
                     with open("token.json", "w") as token_file:
                         token_file.write(creds.to_json())
                     log_message("✅ Saved token.json locally")
-
-            else:
-                raise FileNotFoundError("❌ Google credentials missing in Streamlit secrets")
-        except Exception as e:
-            log_message(f"❌ Authentication failed: {str(e)}")
-            raise
-
-    # Build Gmail service
-    try:
-        service = build("gmail", "v1", credentials=creds)
-        service.users().getProfile(userId='me').execute()
-        log_message("✅ Successfully connected to Gmail API")
-        return service
-    except Exception as e:
-        log_message(f"❌ Failed to build Gmail service: {str(e)}")
-        raise
+                
+                # Build and return service
+                service = build("gmail", "v1", credentials=creds)
+                service.users().getProfile(userId='me').execute()
+                log_message("✅ Successfully connected to Gmail API")
+                return service
+            except Exception as e:
+                st.error(f"Authentication failed: {str(e)}")
+                log_message(f"❌ Authentication error: {str(e)}")
+                return None
+    else:
+        st.error("Google credentials missing in Streamlit secrets")
+        log_message("❌ Google credentials missing in Streamlit secrets")
+    
+    return None
 
 def search_messages(service, query, max_results=100):
     """Search Gmail for messages matching the query."""
