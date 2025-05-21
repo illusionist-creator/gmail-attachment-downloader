@@ -72,6 +72,15 @@ st.markdown("""
     h1, h2, h3 {
         font-weight: 600;
     }
+    /* Make download button more prominent */
+    .big-download-btn button {
+        background-color: #4CAF50;
+        color: white;
+        font-size: 16px;
+        font-weight: bold;
+        height: 3rem;
+        margin-top: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -249,46 +258,32 @@ if st.session_state.service:
         # Download section
         st.markdown("### 📥 Download Options")
         
-        download_col1, download_col2, download_col3 = st.columns([2, 1, 1])
-        
-        with download_col1:
-            download_type = st.radio(
-                "How do you want to download attachments?",
-                ["Save to my computer", "Save on server"],
-                horizontal=True,
-                index=0  # Default to local download
-            )
-            
-            if download_type == "Save on server":
-                dest_folder = st.text_input(
-                    "Server folder path", 
-                    value="downloads", 
-                    help="Folder on the server where attachments will be saved"
-                )
+        # Generate a descriptive zip filename
+        today = datetime.date.today()
+        default_zip_name = f"gmail_attachments_{today.strftime('%Y%m%d')}"
+        if sender:
+            if "<" in sender and ">" in sender:
+                email = sender.split("<")[1].split(">")[0].strip()
+                default_zip_name += f"_{email.split('@')[0]}"
             else:
-                # Generate a descriptive zip filename
-                today = datetime.date.today()
-                default_zip_name = f"gmail_attachments_{today.strftime('%Y%m%d')}"
-                if sender:
-                    if "<" in sender and ">" in sender:
-                        email = sender.split("<")[1].split(">")[0].strip()
-                        default_zip_name += f"_{email.split('@')[0]}"
-                    else:
-                        default_zip_name += f"_{sender.split('@')[0]}"
-                
-                if keyword:
-                    # Add first keyword to filename
-                    first_keyword = keyword.split(',')[0].strip()
-                    default_zip_name += f"_{first_keyword}"
-                
-                zip_filename = st.text_input(
-                    "Zip filename",
-                    value=default_zip_name,
-                    help="Name for the zip file containing all attachments"
-                )
+                default_zip_name += f"_{sender.split('@')[0]}"
+        
+        if keyword:
+            # Add first keyword to filename
+            first_keyword = keyword.split(',')[0].strip()
+            default_zip_name += f"_{first_keyword}"
+        
+        zip_filename = st.text_input(
+            "Zip filename",
+            value=default_zip_name,
+            help="Name for the zip file containing all attachments"
+        )
+        
+        # Download button
+        download_col1, download_col2 = st.columns([3, 1])
         
         with download_col2:
-            st.markdown('<div class="download-btn" style="margin-top: 30px;">', unsafe_allow_html=True)
+            st.markdown('<div class="download-btn">', unsafe_allow_html=True)
             download_button = st.button("📥 Download Attachments", use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
             
@@ -298,7 +293,6 @@ if st.session_state.service:
             
             progress_container = st.empty()
             status_container = st.empty()
-            summary_container = st.empty()
             
             progress_bar = progress_container.progress(0)
             status_container.info("Preparing downloads...")
@@ -308,10 +302,8 @@ if st.session_state.service:
             total_files = 0
 
             try:
-                # For local downloads, use an in-memory collection
+                # Always use in-memory collection for local downloads
                 memory_files = {}
-                in_memory = (download_type == "Save to my computer")
-                dest_folder = "downloads" if not in_memory and not 'dest_folder' in locals() else dest_folder
                 
                 for i, row in st.session_state.df.iterrows():
                     try:
@@ -323,9 +315,9 @@ if st.session_state.service:
                             row["ID"],
                             row["Email"],
                             keyword,
-                            dest_folder,
-                            in_memory,
-                            memory_files if in_memory else None
+                            "downloads",  # Base folder name (will be inside zip)
+                            True,        # Always use in-memory
+                            memory_files  # Store files here
                         )
                         
                         total_files += files_count
@@ -336,47 +328,33 @@ if st.session_state.service:
                     finally:
                         progress_bar.progress((i + 1) / len(st.session_state.df))
                 
+                # Create a zip file from memory files
+                if total_files > 0:
+                    # Create zip buffer
+                    zip_buffer = create_zip_from_attachments(memory_files)
+                    
+                    # Store in session state for download button
+                    st.session_state.zip_buffer = zip_buffer
+                    st.session_state.zip_details = {
+                        "filename": f"{zip_filename}.zip",
+                        "count": total_files
+                    }
+                    
+                    st.session_state.download_status = {
+                        "success": True,
+                        "message": f"✅ Found {total_files} attachments from {success_count} emails",
+                        "details": f"Click the download button below to save them to your computer"
+                    }
+                else:
+                    st.session_state.download_status = {
+                        "success": False,
+                        "message": "⚠️ No attachments found in the selected emails",
+                        "details": "Try adjusting your search criteria"
+                    }
+                
                 # Clean up progress indicators
                 progress_container.empty()
                 status_container.empty()
-                
-                if in_memory:
-                    # Create a zip file from memory files
-                    if total_files > 0:
-                        zip_buffer = create_zip_from_attachments(memory_files)
-                        
-                        # Store in session state for download button
-                        st.session_state.zip_buffer = zip_buffer
-                        st.session_state.zip_details = {
-                            "filename": f"{zip_filename}.zip",
-                            "count": total_files
-                        }
-                        
-                        st.session_state.download_status = {
-                            "success": True,
-                            "message": f"✅ Found {total_files} attachments from {success_count} emails",
-                            "details": f"Click the download button below to save them to your computer"
-                        }
-                    else:
-                        st.session_state.download_status = {
-                            "success": False,
-                            "message": "⚠️ No attachments found in the selected emails",
-                            "details": "Try adjusting your search criteria"
-                        }
-                else:
-                    # Server-side storage (original behavior)
-                    if total_files > 0:
-                        st.session_state.download_status = {
-                            "success": True,
-                            "message": f"✅ Download complete: {total_files} attachments from {success_count} emails",
-                            "details": f"Files saved to server folder: {dest_folder}"
-                        }
-                    else:
-                        st.session_state.download_status = {
-                            "success": False,
-                            "message": "⚠️ No attachments found in the selected emails",
-                            "details": "Try adjusting your search criteria"
-                        }
                 
                 log_message(f"Download summary: {success_count} successes, {error_count} errors, {total_files} files")
                 st.rerun()
@@ -396,15 +374,27 @@ if st.session_state.service:
                     zip_name = st.session_state.zip_details["filename"]
                     file_count = st.session_state.zip_details["count"]
                     
-                    col1, col2 = st.columns([3, 1])
-                    with col2:
-                        st.download_button(
-                            label=f"⬇️ Save {file_count} Files (.zip)",
-                            data=st.session_state.zip_buffer,
-                            file_name=zip_name,
-                            mime="application/zip",
-                            use_container_width=True
-                        )
+                    # Make download button more prominent
+                    st.markdown('<div class="big-download-btn">', unsafe_allow_html=True)
+                    st.download_button(
+                        label=f"⬇️ Download {file_count} Files (.zip)",
+                        data=st.session_state.zip_buffer,
+                        file_name=zip_name,
+                        mime="application/zip",
+                        use_container_width=True
+                    )
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # Show info about the folder structure
+                    st.info("""
+                    **Folder Structure in Zip:**
+                    ```
+                    ├─ [sender email]
+                        ├─ [search term or "all-attachments"]
+                            ├─ [file type - Documents, Images, etc.]
+                                ├─ [timestamp]_[unique ID]_[original filename]
+                    ```
+                    """)
             else:
                 st.warning(st.session_state.download_status["message"])
                 st.caption(st.session_state.download_status["details"])

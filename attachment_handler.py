@@ -177,12 +177,19 @@ def download_attachments(service, msg_id, sender_email, search_term="", base_fol
 def create_zip_from_attachments(memory_files):
     """Create a zip file from in-memory attachments"""
     try:
+        # Use BytesIO for the in-memory zip file
         zip_buffer = io.BytesIO()
         
+        # Create a zip file with the appropriate folder structure
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for file_path, file_data in memory_files.items():
-                zip_file.writestr(file_path, file_data)
+                # Replace backslashes with forward slashes for consistent paths in zip
+                normalized_path = file_path.replace('\\', '/')
                 
+                # Write the file to the zip with its path structure intact
+                zip_file.writestr(normalized_path, file_data)
+                
+        # Reset the pointer to the beginning of the buffer for reading
         zip_buffer.seek(0)
         log_message(f"✅ Created zip archive with {len(memory_files)} files")
         return zip_buffer

@@ -1,7 +1,7 @@
 # requirements.txt
 streamlit==1.32.2
 google-auth==2.23.4
-google-auth-oauthlib==1.1.0  # Changed from 1.2.0 to 1.1.0 for better compatibility
+google-auth-oauthlib>=0.7.0  # Changed from 1.2.0 to 1.1.0 to >=0.7.0 for better compatibility
 google-auth-httplib2==0.1.1
 google-api-python-client==2.108.0
 pandas==2.0.3  # Changed from 2.2.0 to 2.0.3 for better compatibility
