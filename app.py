@@ -234,9 +234,18 @@ if st.session_state.service:
         
         # Format date for better readability
         if "Date" in display_df.columns:
+            # Convert to datetime, coerce errors to NaT
             display_df["Date"] = pd.to_datetime(display_df["Date"], errors='coerce')
-            display_df["Date"] = display_df["Date"].dt.strftime('%Y-%m-%d %H:%M')
-            display_df = display_df.sort_values(by="Date", ascending=False)
+            
+            # Format valid dates, keep NaT as empty string
+            display_df["Date"] = display_df["Date"].apply(
+                lambda x: x.strftime('%Y-%m-%d %H:%M') if pd.notna(x) else "Unknown"
+            )
+            
+            # Sort by date (will place "Unknown" at the end since it's a string)
+            # For better sorting, create a temporary datetime column
+            temp_dates = pd.to_datetime(display_df["Date"], errors='coerce')
+            display_df = display_df.iloc[temp_dates.argsort()[::-1]]  # Sort descending
         
         # Display only relevant columns
         display_cols = ["Sender Name", "Email", "Subject", "Date"]
