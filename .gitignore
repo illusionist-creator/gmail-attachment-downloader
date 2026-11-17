@@ -23,3 +23,8 @@ __pycache__/
 *.log
  
  
+# local virtualenv
+Lib/
+Scripts/
+pyvenv.cfg
+Include/
